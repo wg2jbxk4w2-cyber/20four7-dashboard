@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>20FOUR7 Lager-Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #111; color: #f0f0f0; padding: 1.5rem; min-height: 100vh; }
+  .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 8px; }
+  .header-title { font-size: 20px; font-weight: 600; color: #fff; }
+  .header-sub { font-size: 13px; color: #888; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1.5rem; }
+  .summary-card { background: #1c1c1c; border-radius: 10px; padding: 1rem 1.25rem; border: 0.5px solid #2a2a2a; }
+  .summary-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .summary-value { font-size: 26px; font-weight: 600; }
+  .red { color: #e24b4a; }
+  .amber { color: #ef9f27; }
+  .green { color: #63991f; }
+  .section-label { font-size: 13px; font-weight: 500; color: #888; margin-bottom: 10px; letter-spacing: 0.02em; }
+  .shop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
+  .shop-card { background: #1c1c1c; border: 0.5px solid #2a2a2a; border-radius: 12px; padding: 1rem 1.25rem; }
+  .shop-name { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 10px; }
+  .badges { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+  .badge-leer { background: #3a1a1a; color: #e24b4a; }
+  .badge-kritisch { background: #3a2a0a; color: #ef9f27; }
+  .badge-niedrig { background: #2a2a0a; color: #d4a017; }
+  .badge-ok { background: #1a2a0a; color: #63991f; }
+  .artikel-list { border-top: 0.5px solid #2a2a2a; padding-top: 10px; }
+  .artikel-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 0.5px solid #222; }
+  .artikel-row:last-child { border-bottom: none; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex-shrink: 0; }
+  .dot-leer { background: #e24b4a; }
+  .dot-kritisch { background: #ef9f27; }
+  .artikel-name { font-size: 13px; color: #ddd; flex: 1; padding-right: 8px; }
+  .artikel-fehlt { font-size: 13px; font-weight: 600; }
+  .fehlt-leer { color: #e24b4a; }
+  .fehlt-kritisch { color: #ef9f27; }
+  .alles-ok { font-size: 13px; color: #555; padding-top: 8px; }
+  .updated { font-size: 12px; color: #555; margin-top: 1rem; text-align: right; }
+  .loading { text-align: center; color: #555; padding: 3rem; font-size: 14px; }
+  @media (max-width: 600px) {
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .header { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-title">20FOUR7 Lager-Übersicht</span>
+  <span class="header-sub" id="datum"></span>
+</div>
+
+<div class="summary-grid" id="summary-grid">
+  <div class="loading" style="grid-column:1/-1">Daten werden geladen...</div>
+</div>
+
+<div class="section-label">Status pro Shop</div>
+<div class="shop-grid" id="shop-grid"></div>
+
+<p class="updated" id="updated-at"></p>
+
+<script>
+const SHEET_ID = '1BNq84-3ocljRb9Z--g6DOa7uph-e-AzxfkE0ZLU7P4Y';
+const SHOPS = [
+  { name: 'Breslauer Str.', tab: 'Lager_Breslauer' },
+  { name: 'Delbrück', tab: 'Lager_Dellbrueck' },
+  { name: 'Detmolder Str.', tab: 'Lager_Detmolder' },
+  { name: 'Heiersstraße', tab: 'Lager_Heierstrasse' },
+  { name: 'Mönkeloh', tab: 'Lager_Monkeloh' },
+  { name: 'Rosenstraße', tab: 'Lager_Rosen' },
+];
+
+function csvUrl(tab) {
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+}
+
+async function fetchShop(shop) {
+  const res = await fetch(csvUrl(shop.tab));
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  return parsed.data;
+}
+
+function renderSummary(allData) {
+  let leer = 0, kritisch = 0, niedrig = 0, ok = 0;
+  allData.forEach(({ rows }) => {
+    rows.forEach(r => {
+      const s = (r['Status'] || '').trim();
+      if (s === 'LEER') leer++;
+      else if (s === 'KRITISCH') kritisch++;
+      else if (s === 'NIEDRIG') niedrig++;
+      else if (s === 'OK') ok++;
+    });
+  });
+  document.getElementById('summary-grid').innerHTML = `
+    <div class="summary-card"><div class="summary-label">Leer</div><div class="summary-value red">${leer}</div></div>
+    <div class="summary-card"><div class="summary-label">Kritisch</div><div class="summary-value amber">${kritisch}</div></div>
+    <div class="summary-card"><div class="summary-label">Niedrig</div><div class="summary-value amber">${niedrig}</div></div>
+    <div class="summary-card"><div class="summary-label">OK</div><div class="summary-value green">${ok}</div></div>
+  `;
+}
+
+function renderShops(allData) {
+  const grid = document.getElementById('shop-grid');
+  grid.innerHTML = '';
+  allData.forEach(({ shop, rows }) => {
+    const leer = rows.filter(r => (r['Status']||'').trim() === 'LEER');
+    const kritisch = rows.filter(r => (r['Status']||'').trim() === 'KRITISCH');
+    const niedrig = rows.filter(r => (r['Status']||'').trim() === 'NIEDRIG');
+    const ok = rows.filter(r => (r['Status']||'').trim() === 'OK').length;
+    const kritische = [...leer, ...kritisch].slice(0, 6);
+
+    const badges = `
+      <div class="badges">
+        ${leer.length ? `<span class="badge badge-leer">${leer.length} Leer</span>` : ''}
+        ${kritisch.length ? `<span class="badge badge-kritisch">${kritisch.length} Kritisch</span>` : ''}
+        ${niedrig.length ? `<span class="badge badge-niedrig">${niedrig.length} Niedrig</span>` : ''}
+        <span class="badge badge-ok">${ok} OK</span>
+      </div>`;
+
+    const artikelHtml = kritische.length ? `
+      <div class="artikel-list">
+        ${kritische.map(r => {
+          const status = (r['Status']||'').trim();
+          const name = (r['Artikel']||r['Article']||'').trim();
+          const fehlt = r['Unterschied']||r['Diff']||'?';
+          return `
+            <div class="artikel-row">
+              <div class="status-dot ${status === 'LEER' ? 'dot-leer' : 'dot-kritisch'}"></div>
+              <span class="artikel-name">${name}</span>
+              <span class="artikel-fehlt ${status === 'LEER' ? 'fehlt-leer' : 'fehlt-kritisch'}">fehlt ${fehlt}x</span>
+            </div>`;
+        }).join('')}
+      </div>` : `<div class="alles-ok">Alle Artikel im grünen Bereich</div>`;
+
+    const card = document.createElement('div');
+    card.className = 'shop-card';
+    card.innerHTML = `<div class="shop-name">${shop.name}</div>${badges}${artikelHtml}`;
+    grid.appendChild(card);
+  });
+}
+
+async function init() {
+  const now = new Date();
+  document.getElementById('datum').textContent = now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('updated-at').textContent = `Zuletzt geladen: ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`;
+
+  const allData = await Promise.all(SHOPS.map(async shop => {
+    try {
+      const rows = await fetchShop(shop);
+      return { shop, rows };
+    } catch(e) {
+      return { shop, rows: [] };
+    }
+  }));
+
+  renderSummary(allData);
+  renderShops(allData);
+}
+
+init();
+</script>
+</body>
+</html>
